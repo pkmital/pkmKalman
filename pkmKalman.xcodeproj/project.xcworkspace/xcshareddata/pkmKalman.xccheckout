@@ -6,24 +6,40 @@
 	<false/>
 	<key>IDESourceControlProjectIdentifier</key>
 	<string>821B04CE-F8D7-46B7-8FE7-A6AE6357F43E</string>
+	<key>IDESourceControlProjectName</key>
+	<string>pkmKalman</string>
 	<key>IDESourceControlProjectOriginsDictionary</key>
 	<dict>
 		<key>92F288102054365C4B11BAD078303B89B1B39C09</key>
 		<string>https://github.com/pkmital/pkmMatrix</string>
+		<key>CC6E2C52937C7F0565B2A159025A26664950C899</key>
+		<string>github.com:pkmital/pkmKalman.git</string>
 	</dict>
+	<key>IDESourceControlProjectPath</key>
+	<string>pkmKalman.xcodeproj</string>
 	<key>IDESourceControlProjectRelativeInstallPathDictionary</key>
 	<dict>
 		<key>92F288102054365C4B11BAD078303B89B1B39C09</key>
-		<string>pkmMatrix/</string>
+		<string>../../../pkmMatrix</string>
+		<key>CC6E2C52937C7F0565B2A159025A26664950C899</key>
+		<string>../..</string>
 	</dict>
 	<key>IDESourceControlProjectURL</key>
-	<string>https://github.com/pkmital/pkmMatrix</string>
+	<string>github.com:pkmital/pkmKalman.git</string>
 	<key>IDESourceControlProjectVersion</key>
 	<integer>111</integer>
 	<key>IDESourceControlProjectWCCIdentifier</key>
-	<string>92F288102054365C4B11BAD078303B89B1B39C09</string>
+	<string>CC6E2C52937C7F0565B2A159025A26664950C899</string>
 	<key>IDESourceControlProjectWCConfigurations</key>
 	<array>
+		<dict>
+			<key>IDESourceControlRepositoryExtensionIdentifierKey</key>
+			<string>public.vcs.git</string>
+			<key>IDESourceControlWCCIdentifierKey</key>
+			<string>CC6E2C52937C7F0565B2A159025A26664950C899</string>
+			<key>IDESourceControlWCCName</key>
+			<string>pkmKalman</string>
+		</dict>
 		<dict>
 			<key>IDESourceControlRepositoryExtensionIdentifierKey</key>
 			<string>public.vcs.git</string>

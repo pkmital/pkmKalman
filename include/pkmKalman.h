@@ -5,6 +5,8 @@
  Kalman Filtering
  
  Copyright (C) 2015 Parag K. Mital
+ Written for Firef.ly LocationKit
+ Firef.ly has unrestricted use of this code.
  
  The Software is and remains the property of Parag K Mital
  ("pkmital") The Licensee will ensure that the Copyright Notice set
@@ -87,8 +89,6 @@
 
 #include "pkmMatrix.h"
 
-using namespace pkm;
-
 namespace pkm {
     
     //----------------------------------------------------------------------
@@ -126,6 +126,29 @@ namespace pkm {
             Ht = Mat::Mat();
             R = Mat::eye(dim_z);
             I = Mat::eye(dim_x);
+            
+            type = KALMAN_UPDATE_ROBUST_GAIN;
+        }
+        
+        //----------------------------------------------------------------------
+        void allocateKinematicFilter(int position_dimensions, int filter_order, float dt = 1.0f)
+        {
+            allocate(filter_order*position_dimensions, position_dimensions);
+            
+            float dt2 = powf(dt, 2.0f);
+            float dt3 = powf(dt, 3.0f);
+            float dt4 = powf(dt, 4.0f);
+            
+            float Fdat[5][5] = {
+                { 1,  dt, dt2, dt3,  dt4 },
+                { 0,   1,  dt, dt2,  dt3 },
+                { 0,   0,   1,  dt,  dt2 },
+                { 0,   0,   0,   1,   dt },
+                { 0,   0,   0,   0,    1 },
+            };
+            float Hdat[1][5] = {
+                {1, 0, 0, 0, 0}
+            };
         }
         
         //----------------------------------------------------------------------
@@ -168,9 +191,19 @@ namespace pkm {
             // x = x + Ky
             x = x + K.dot(y);
             
-            // P = (I-KH)P(I-KH)' + KRK'
             Mat I_KH = I - K.dot(H);
-            P = I_KH.dot(P).dot(I_KH.getTranspose()) + K.dot(R).dot(K.getTranspose()); //- P.dot(H.getTranspose()).dot(K.getTranspose()) + K.dot(S).dot(K.getTranspose());
+            
+            if (type == KALMAN_UPDATE_OPTIMAL_GAIN) {
+                // P = (I-KH)P(I-KH)';
+                P = I_KH.dot(P).dot(I_KH.getTranspose());
+            }
+            else if(type == KALMAN_UPDATE_ROBUST_GAIN) {
+                // P = (I-KH)P(I-KH)' + KRK'
+                P = I_KH.dot(P).dot(I_KH.getTranspose()) + K.dot(R).dot(K.getTranspose());
+            }
+            else {
+                P = I_KH.dot(P).dot(I_KH.getTranspose()) - P.dot(H.getTranspose()).dot(K.getTranspose()) + K.dot(S).dot(K.getTranspose());
+            }
 
         }
         
@@ -182,6 +215,8 @@ namespace pkm {
             }
             else {
                 x = F.dot(x) + B.dot(u);
+                
+                // Project P to the next time step adding our uncertainty from the process noise
                 P = F.dot(P).dot(F.getTranspose()) + Q;
             }
         }
@@ -190,6 +225,8 @@ namespace pkm {
         void predict()
         {
             x = F.dot(x);
+            
+            // Project P to the next time step adding our uncertainty from the process noise
             P = F.dot(P).dot(F.getTranspose()) + Q;
         }
         
@@ -224,7 +261,7 @@ namespace pkm {
         {
             return x;
         }
-        Mat getX()
+        Mat get_x()
         {
             return x;
         }
@@ -245,9 +282,9 @@ namespace pkm {
         //----------------------------------------------------------------------
         Mat getStateCovariance()
         {
-            return getP();
+            return get_P();
         }
-        Mat getP()
+        Mat get_P()
         {
             return P;
         }
@@ -316,29 +353,136 @@ namespace pkm {
         }
         
         //----------------------------------------------------------------------
-        void setProcessNoise(float dt,      // time step in whatever unit the filter uses
-                             float var)     // noise variance
+        // Q is a discrete model of the continuous noise in the system, integrated over a time step
+        // Here we can specify the timestep and likely noise across that timestep
+        void setProcessNoiseAsContinuousWhiteNoise(float dt,      // time step in whatever unit the filter uses
+                                                   float phi)     // noise std. deviation (set it near the maximum value the acceleration changes between time points)
         {
-            if (dim_x == 2) {
-                float Qdat[2][2] = {{ powf(.25*dt,4), powf(.5*dt,3) },
-                                 { powf(.5*dt,3),  powf(dt,2)    }};
-                Mat Q(2, 2, &Qdat[0][0]);
-                Q.multiply(var);
-                setProcessNoise(Q);
-                
+            Mat Q;
+            int num_states_per_observation = dim_x / dim_z;
+            
+            if (num_states_per_observation == 1) {
+                Q = Mat(1, 1, dt);
             }
-            else if(dim_x == 3) {
-                float Qdat[3][3] = {{ powf(.25*dt,4), powf(.5*dt,3), powf(.5*dt,2) },
-                                 { powf(.5*dt,3),    powf(dt,2),       dt      },
-                                 { powf(.5*dt,2),       dt,            1.0f      }};
-                Mat Q(3, 3, &Qdat[0][0]);
-                Q.multiply(var);
-                setProcessNoise(Q);
+            else if (num_states_per_observation == 2) {
+                float Qdat[2][2] = {
+                    { powf(dt,3)/3.0f,    powf(dt,2)/2.0f },
+                    { powf(dt,2)/2.0f,           dt       }
+                };
+                Q = Mat(2, 2, &Qdat[0][0]);
+            }
+            else if(num_states_per_observation == 3) {
+                float Qdat[3][3] = {
+                    { powf(dt,5)/20.0f,   powf(dt,4)/8.0f,    powf(dt,3)/6.0f },
+                    { powf(dt,4)/8.0f,    powf(dt,3)/3.0f,    powf(dt,2)/2.0f },
+                    { powf(dt,3)/6.0f,    powf(dt,2)/2.0f,           dt       }
+                };
+                Q = Mat(3, 3, &Qdat[0][0]);
+            }
+            else if(num_states_per_observation == 4) {
+                float Qdat[4][4] = {
+                    { powf(dt,7)/63.0f,   powf(dt,6)/36.0f,   powf(dt,5)/15.0f,   powf(dt,4)/12.0f  },
+                    { powf(dt,6)/36.0f,   powf(dt,5)/20.0f,   powf(dt,4)/8.0f,    powf(dt,3)/6.0f   },
+                    { powf(dt,5)/15.0f,   powf(dt,4)/8.0f,    powf(dt,3)/3.0f,    powf(dt,2)/2.0f   },
+                    { powf(dt,4)/12.0f,   powf(dt,3)/6.0f,    powf(dt,2)/2.0f,           dt         }
+                };
+                Q = Mat(4, 4, &Qdat[0][0]);
+            }
+            else if(num_states_per_observation == 5) {
+                float Qdat[5][5] = {
+                    { powf(dt,9)/144.0f,  powf(dt,8)/96.0f,   powf(dt,7)/56.0f,   powf(dt,6)/24.0f,  powf(dt,5)/20.0f },
+                    { powf(dt,8)/96.0f,   powf(dt,7)/63.0f,   powf(dt,6)/36.0f,   powf(dt,5)/15.0f,  powf(dt,4)/12.0f },
+                    { powf(dt,7)/56.0f,   powf(dt,6)/36.0f,   powf(dt,5)/20.0f,   powf(dt,4)/8.0f,   powf(dt,3)/6.0f  },
+                    { powf(dt,6)/24.0f,   powf(dt,5)/15.0f,   powf(dt,4)/8.0f,    powf(dt,3)/3.0f,   powf(dt,2)/2.0f  },
+                    { powf(dt,5)/20.0f,   powf(dt,4)/12.0f,   powf(dt,3)/6.0f,    powf(dt,2)/2.0f,           dt       }
+                };
+                Q = Mat(5, 5, &Qdat[0][0]);
+                Q.print();
             }
             else {
-                printf("[pkm::Kalman]::ERROR! Setting process noise using dt/var formula only supports dim = 2 or 3!  Manually set Process Noise using another formulation (e.g. setProcessNoise(const Mat &Q))\n");
+                printf("[pkm::Kalman]::ERROR, void setProcessNoise(float dt, float std) only supports up to 4 states per observation.  Set process noise manually (e.g.: void setProcessNoise(const Mat &Q))!");
                 return;
             }
+            
+            Q.multiply(phi);
+            
+            // put m2 in LR
+            Mat zeros(num_states_per_observation, num_states_per_observation, 0.0f);
+            Q.setTranspose();
+            zeros.push_back(Q);
+            zeros.setTranspose();
+            Q.push_back(Mat(num_states_per_observation, num_states_per_observation, 0.0f));
+            Q.setTranspose();
+            Q.push_back(zeros);
+            Q.print();
+            
+            
+            setProcessNoise(Q);
+            
+        }
+        void setProcessNoiseAsPiecewiseWhiteNoise(float dt,      // time step in whatever unit the filter uses
+                                                  float std)     // noise std. deviation (set it near the maximum value the acceleration changes between time points)
+        {
+            Mat Q;
+            int num_states_per_observation = dim_x / dim_z;
+            
+            if (num_states_per_observation == 1) {
+                Q = Mat(1, 1, dt);
+            }
+            else if (num_states_per_observation == 2) {
+                float Qdat[2][2] = {
+                    { powf(dt,2),   dt },
+                    {     dt,       1  }
+                };
+                Q = Mat(2, 2, &Qdat[0][0]);
+            }
+            else if(num_states_per_observation == 3) {
+                float Qdat[3][3] = {
+                    { powf(dt,4)/4.0f,   powf(dt,3)/2.0f,    powf(dt,2)/2.0f },
+                    { powf(dt,3)/2.0f,      powf(dt,2),              dt      },
+                    { powf(dt,2)/2.0f,          dt,                  1       }
+                };
+                Q = Mat(3, 3, &Qdat[0][0]);
+            }
+            else if(num_states_per_observation == 4) {
+                float Qdat[4][4] = {
+                    { powf(dt,6)/36.0f,   powf(dt,5)/12.0f,   powf(dt,4)/6.0f,    powf(dt,3)/6.0f  },
+                    { powf(dt,5)/12.0f,   powf(dt,4)/4.0f,    powf(dt,3)/2.0f,    powf(dt,2)/2.0f  },
+                    { powf(dt,4)/6.0f,    powf(dt,3)/2.0f,    powf(dt,2),            dt            },
+                    { powf(dt,3)/6.0f,    powf(dt,2)/2.0f,    dt,                    1             }
+                };
+                Q = Mat(4, 4, &Qdat[0][0]);
+            }
+            else if(num_states_per_observation == 5) {
+                float Qdat[5][5] = {
+                    { powf(dt,8)/576.0f,  powf(dt,7)/144.0f,   powf(dt,6)/48.0f,   powf(dt,5)/24.0f,  powf(dt,4)/24.0f },
+                    { powf(dt,7)/144.0f,  powf(dt,6)/36.0f,    powf(dt,5)/12.0f,   powf(dt,4)/6.0f,   powf(dt,3)/6.0f },
+                    { powf(dt,6)/48.0f,   powf(dt,5)/12.0f,    powf(dt,4)/4.0f,    powf(dt,3)/2.0f,   powf(dt,2)/2.0f  },
+                    { powf(dt,5)/24.0f,   powf(dt,4)/6.0f,     powf(dt,3)/2.0f,    powf(dt,2),               dt  },
+                    { powf(dt,4)/24.0f,   powf(dt,3)/6.0f,     powf(dt,2)/2.0f,         dt,                  1       }
+                };
+                Q = Mat(5, 5, &Qdat[0][0]);
+                Q.print();
+            }
+            else {
+                printf("[pkm::Kalman]::ERROR, void setProcessNoise(float dt, float std) only supports up to 4 states per observation.  Set process noise manually (e.g.: void setProcessNoise(const Mat &Q))!");
+                return;
+            }
+            
+            Q.multiply(std * std);
+            
+            
+            // put m2 in LR
+            Mat zeros(num_states_per_observation, num_states_per_observation, 0.0f);
+            Q.setTranspose();
+            zeros.push_back(Q);
+            zeros.setTranspose();
+            Q.push_back(Mat(num_states_per_observation, num_states_per_observation, 0.0f));
+            Q.setTranspose();
+            Q.push_back(zeros);
+            Q.print();
+            
+            setProcessNoise(Q);
             
         }
         void setProcessNoise(const Mat &Q)
@@ -406,6 +550,22 @@ namespace pkm {
         Mat I;
         
         //----------------------------------------------------------------------
+        
+    public:
+        
+        typedef enum {
+            KALMAN_UPDATE_OPTIMAL_GAIN = 0,
+            KALMAN_UPDATE_ROBUST_GAIN = 1,
+            KALMAN_UPDATE_VERY_ROBUST_GAIN = 2
+        } update_types;
+        
+        void setUpdateType(update_types type)
+        {
+            this->type = type;
+        }
+        
+    private:
+        update_types type;
 
     };
     
